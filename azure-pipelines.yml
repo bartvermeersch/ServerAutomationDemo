@@ -29,7 +29,7 @@ steps:
   - task: PowerShell@2
     inputs:
       targetType: "inline"
-      script: New-AzResourceGroup -Name $(azure_resource_group_name) -Location eastus -Force
+      script: New-AzResourceGroup -Name $(azure_resource_group_name) -Location westeu -Force
   - task: Pester@10
     inputs:
       scriptFolder: "@{Path='$(System.DefaultWorkingDirectory)/server.template.tests.ps1'; Parameters=@{ResourceGroupName='$(azure_resource_group_name)'}}"
@@ -43,7 +43,7 @@ steps:
       subscriptionId: "$(subscription_id)"
       action: "Create Or Update Resource Group"
       resourceGroupName: $(azure_resource_group_name)
-      location: "East US"
+      location: "West Europe"
       templateLocation: "Linked artifact"
       csmFile: "server.json"
       csmParametersFile: "server.parameters.json"
