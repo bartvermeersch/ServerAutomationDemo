@@ -1,0 +1,78 @@
+#based upon https://adamtheautomator.com/azure-devops-pipeline-infrastructure/
+
+$azureSubscriptionName = "VSE-BV"
+$azureSubscriptionID = "1226b9ff-f978-4b74-b547-9b0268ca320f"
+$tenantID = "d65e309a-e4ef-438c-93d7-7fe0d3c48132"
+$devOpsOrgName = "vermeersch"
+$devOrgUrl = "https://dev.azure.com/$devOpsOrgName"
+$devOpsProjectName ="arm-pipeline-demo"
+$region = "westeurope"
+$azureResourceGroup = "personal-arm-pipeline"
+$pw = "Twist080904!"
+$gitHubURL = "https://github.com/bartvermeersch/ServerAutomationDemo"
+$kvName = "personal-arm-pipeline-kv"
+$pipelineName = "ServerAutomationDemo"
+
+az login
+az account set --subscription $azureSubscriptionName
+
+#add CLI devops extension
+az extension add --name azure-devops
+az devops configure --defaults organization=$devOrgUrl
+
+#create resource group
+az group create --location $region --name $azureResourceGroup
+
+#create Azure Service Principal
+$spIdUri = "http://ServerAutomationDemo"
+$sp = az ad sp create-for-rbac --name $spIdUri | ConvertFrom-Json
+
+#create Azure Keyvault
+az keyvault create --location $region --name $kvName --resource-group $azureResourceGroup --enabled-for-template-deployment true
+
+#create secrets
+az keyvault secret set --name "ServerAutomationDemo-AppPw" --value $sp.password --vault-name $kvName
+az keyvault secret set --name StandardVmAdminPassword --value $pw --vault-name $kvName
+
+#Allow devops pipeline to access kv (get & list)
+az keyvault set-policy --name $kvName --spn $spIdUri --secret-permissions get list
+
+#install pester extension in devops
+az devops extension install --extension-id PesterRunner --publisher-id Pester
+
+#create DevOps Project and set as default
+az devops project create --name $devOpsProjectName
+az devops configure --defaults project=$devOpsProjectName
+
+#create ARM service connection, manuelly copy service principal password and paste it
+$sp.Password
+az devops service-endpoint azurerm create --azure-rm-service-principal-id $sp.appId --azure-rm-subscription-id $azureSubscriptionID --azure-rm-subscription-name $azureSubscriptionName  --azure-rm-tenant-id $tenantId --name 'ARM'
+
+# TODO check CLI on how to link using GiHub App, see 
+# https://docs.microsoft.com/en-us/azure/devops/pipelines/repos/github?view=azure-devops&tabs=yaml#github-app-authentication
+# https://github.com/apps/azure-pipelines
+#create Github service connection
+$gitHubServiceEndpoint = az devops service-endpoint github create --github-url $gitHubURL --name 'GitHub' | ConvertFrom-Json
+
+#create variable group to store pw secrets
+az pipelines variable-group create --name "ServerAutomationDemo" --authorize true --variables foo=bar
+
+#linking variable group to keyvalt secrets except by UI...
+"Linking variable group to keyvault secrets can only by done through the UI..."
+
+#create pipeline
+az pipelines create --name $pipelineName --repository $gitHubURL --branch master --service-connection $gitHubServiceEndpoint.id --skip-run
+
+
+#cleanup resources
+read-host "-- cleanup resources --"
+
+$spId = ((az ad sp list --all | ConvertFrom-Json) | ? { 'http://ServerAutomationDemo' -in $_.serviceprincipalnames }).objectId
+az ad sp delete --id $spId
+
+## Remove the resource group
+az group delete --name $azureResourceGroup --yes --no-wait
+
+## remove project
+$projectId = ((az devops project list | convertfrom-json).value | where { $_.name -eq $devOpsProjectName }).id
+az devops project delete --id $projectId --yes
